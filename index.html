@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Teaching Assistant with Voice Quiz</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      padding: 20px;
+      background: #f4f4f4;
+      max-width: 800px;
+      margin: auto;
+    }
+    h2, h3, h4 { color: #333; }
+    input, textarea, button {
+      display: block;
+      margin: 10px 0;
+      width: 100%;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    #questionsList {
+      background: #fff;
+      padding: 10px;
+      border-radius: 5px;
+      margin-top: 10px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.1);
+    }
+    .question-item {
+      margin-bottom: 10px;
+      padding-bottom: 5px;
+      border-bottom: 1px solid #eee;
+    }
+    video {
+      display: block;
+      margin-top: 20px;
+      max-width: 100%;
+      border: 2px solid #ccc;
+      border-radius: 8px;
+    }
+    #quizDisplay {
+      background: #fff3cd;
+      padding: 15px;
+      margin-top: 20px;
+      border-left: 6px solid #ffc107;
+      border-radius: 6px;
+      display: none;
+    }
+    #quizDisplay p {
+      margin: 5px 0;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+  </style>
+</head>
+<body>
+  <h2>🎓 AI Teaching Assistant</h2>
+
+  <label>Topic:</label>
+  <input type="text" id="topic" readonly />
+
+  <label>Subtopic:</label>
+  <input type="text" id="subtopic" readonly />
+
+  <label>Selected Description:</label>
+  <textarea id="originalDescription" readonly></textarea>
+
+  <label>Or Type Your Own Description:</label>
+  <textarea id="customDescription" placeholder="Type your own lesson description here..."></textarea>
+
+  <h3>📋 Add Quiz Questions</h3>
+  <input type="text" id="questionInput" placeholder="Enter question..." />
+  <input type="text" id="answerInput" placeholder="Enter answer..." />
+  <button onclick="addQuestion()">➕ Add Question</button>
+
+  <div id="questionsList">
+    <h4>✅ Added Questions:</h4>
+    <div id="addedQuestions"></div>
+  </div>
+
+  <button onclick="generateVideo()">🎥 Generate Video</button>
+  <video id="video" controls></video>
+
+  <button onclick="saveToDatabase()">💾 Save</button>
+
+  <!-- 👇 Quiz Display Box -->
+  <div id="quizDisplay">
+    <p><strong>Question:</strong> <span id="currentQuestionText"></span></p>
+    <p><strong>Your Answer:</strong> <span id="spokenAnswerText">...waiting for your answer...</span></p>
+    <p><strong>Correct Answer:</strong> <span id="correctAnswerText"></span></p>
+  </div>
+
+  <script>
+    // 📥 Get dynamic data from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const topic = urlParams.get("topic") || "";
+    const subtopic = urlParams.get("subtopic") || "";
+    const description = urlParams.get("description") || "";
+
+    document.getElementById("topic").value = topic;
+    document.getElementById("subtopic").value = subtopic;
+    document.getElementById("originalDescription").value = decodeURIComponent(description);
+
+    const questions = [];
+
+    function addQuestion() {
+      const q = document.getElementById("questionInput").value.trim();
+      const a = document.getElementById("answerInput").value.trim();
+      if (!q || !a) return alert("Please enter both question and answer.");
+      questions.push({ question: q, answer: a });
+      document.getElementById("questionInput").value = "";
+      document.getElementById("answerInput").value = "";
+      updateQuestionDisplay();
+    }
+
+    function updateQuestionDisplay() {
+      const container = document.getElementById("addedQuestions");
+      container.innerHTML = "";
+      questions.forEach((qa, index) => {
+        const div = document.createElement("div");
+        div.className = "question-item";
+        div.innerHTML = `<strong>Q${index + 1}:</strong> ${qa.question}<br/><strong>A:</strong> ${qa.answer}`;
+        container.appendChild(div);
+      });
+    }
+
+    async function generateVideo() {
+      const descriptionToUse = document.getElementById("customDescription").value.trim() || document.getElementById("originalDescription").value.trim();
+      const res = await fetch("http://localhost:3000/generate-and-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic, subtopic, description: descriptionToUse })
+      });
+
+      const data = await res.json();
+      const video = document.getElementById("video");
+      video.src = data.firebase_video_url;
+      video.onended = () => startVoiceQuiz();
+    }
+
+    async function saveToDatabase() {
+      const descriptionToUse = document.getElementById("customDescription").value.trim() || document.getElementById("originalDescription").value.trim();
+      const videoUrl = document.getElementById("video").src;
+      if (!videoUrl) return alert("Please generate video first.");
+
+      const res = await fetch("http://localhost:3000/save-full-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic,
+          subtopic,
+          description: descriptionToUse,
+          questions,
+          video_url: videoUrl
+        })
+      });
+
+      const result = await res.json();
+      alert(result.message || "Saved successfully!");
+    }
+
+    // 🎤 Voice-based quiz after video ends
+    function startVoiceQuiz() {
+      if (!questions.length) {
+        alert("No quiz questions added.");
+        return;
+      }
+
+      let index = 0;
+      const quizBox = document.getElementById("quizDisplay");
+      quizBox.style.display = "block";
+
+      function askQuestion() {
+        if (index >= questions.length) {
+          speak("Quiz completed. Well done!");
+          quizBox.style.display = "none";
+          return;
+        }
+
+        const current = questions[index];
+        document.getElementById("currentQuestionText").textContent = current.question;
+        document.getElementById("spokenAnswerText").textContent = "...waiting for your answer...";
+        document.getElementById("correctAnswerText").textContent = "";
+
+        speak(current.question);
+
+        listen((spokenAnswer) => {
+          const correct = current.answer.toLowerCase().trim();
+          const given = spokenAnswer.toLowerCase().trim();
+
+          document.getElementById("spokenAnswerText").textContent = spokenAnswer;
+          document.getElementById("correctAnswerText").textContent = current.answer;
+
+          if (given === correct || given.includes(correct) || correct.includes(given)) {
+            speak("Correct answer, well done!");
+          } else {
+            speak("Wrong answer. The correct answer is " + current.answer);
+          }
+
+          index++;
+          setTimeout(askQuestion, 4000);
+        });
+      }
+
+      askQuestion();
+    }
+
+    function speak(text) {
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'en-US';
+      speechSynthesis.speak(utter);
+    }
+
+    function listen(callback) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        alert("Speech recognition not supported");
+        callback("");
+        return;
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.start();
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        callback(transcript);
+      };
+
+      recognition.onerror = () => {
+        speak("Sorry, I didn't catch that. Please try again.");
+        callback("");
+      };
+    }
+  </script>
+</body>
+</html>
